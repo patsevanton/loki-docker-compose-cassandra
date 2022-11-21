@@ -1,4 +1,12 @@
-version: "3"
+version: '3.8'
+
+x-logging:
+  &default-logging
+  driver: "json-file"
+  options:
+    max-size: "1m"
+    max-file: "1"
+    tag: "{{.Name}}"
 
 services:
   redis:
@@ -20,14 +28,18 @@ services:
       loki:
         aliases:
           - redis
+    logging: *default-logging
 
   loki:
     image: grafana/loki:2.3.0
+    container_name: loki
     depends_on:
-      - cassandra
-      - redis
+      redis:
+        condition: service_started
+      cassandra:
+        condition: service_healthy
     volumes:
-      - /etc/docker-compose/local-config.yaml:/etc/loki/local-config.yaml
+      - ./local-config.yaml:/etc/loki/local-config.yaml
       - loki:/loki
     ports:
       - "3100:3100"
@@ -37,12 +49,19 @@ services:
       loki:
         aliases:
           - loki
+    logging: *default-logging
 
   cassandra:
     image: bitnami/cassandra:3.11.11
+    container_name: cassandra
     volumes:
       - cassandra:/bitnami
     restart: always
+    healthcheck:
+      test: [ "CMD", "cqlsh", "-u", "cassandra", "-p", "cassandra", "-e", "SELECT table_name FROM system_schema.tables WHERE keyspace_name='loki';" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     environment:
       CASSANDRA_USER: cassandra
       CASSANDRA_PASSWORD: cassandra
@@ -52,11 +71,54 @@ services:
       loki:
         aliases:
           - cassandra
+    logging: *default-logging
+
+  promtail:
+    image:  grafana/promtail:2.4.2
+    container_name: promtail
+    restart: always
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./docker-config.yaml:/etc/promtail/docker-config.yaml
+    command: -config.file=/etc/promtail/docker-config.yaml
+    depends_on:
+      loki:
+        condition: service_started
+    networks:
+      loki:
+        aliases:
+          - promtail
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:8.4.5
+    container_name: grafana
+    restart: always
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_USERS_DEFAULT_THEME=light
+      - GF_LOG_MODE=console
+      - GF_LOG_LEVEL=critical
+    ports:
+      - "3000:3000"
+    networks:
+      loki:
+        aliases:
+          - grafana
+    depends_on:
+      loki:
+        condition: service_started
+    volumes:
+      - ./datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - grafana:/var/lib/grafana
+    logging: *default-logging
 
 volumes:
   cassandra:
   loki:
   redis_data:
+  grafana:
 
 networks:
   loki:
