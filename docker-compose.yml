@@ -90,6 +90,19 @@ services:
           - promtail
     logging: *default-logging
 
+  log-generator:
+    image: mingrammer/flog
+    restart: always
+    command:
+      - --loop
+      - --format=json
+      - --number=10
+      - --delay=100ms
+    depends_on:
+      promtail:
+        condition: service_started
+    logging: *default-logging
+
   grafana:
     image: grafana/grafana:8.4.5
     container_name: grafana
@@ -97,7 +110,6 @@ services:
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-      - GF_USERS_DEFAULT_THEME=light
       - GF_LOG_MODE=console
       - GF_LOG_LEVEL=critical
     ports:
